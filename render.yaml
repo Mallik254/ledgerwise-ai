@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: ledgerwise-ai
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        value: https://nipsnpttesinenogregd.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_ukXEYcsr9sxFIbJxCexJUQ_sFKi8oqO
