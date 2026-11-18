@@ -11,6 +11,11 @@
     "build": "npm --prefix client install && npm --prefix client run build && npm --prefix server install",
     "start": "node server/index.js"
   },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
   "keywords": [
     "ledger",
     "double-entry",
