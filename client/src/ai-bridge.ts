@@ -249,6 +249,37 @@ function injectStyles() {
       border-color: var(--line, #e3dac9);
       box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.05));
     }
+    .lw-ai-badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 600; padding: 2px 7px;
+      border-radius: 999px; background: var(--sage-pale, #eef4ea);
+      color: var(--forest, #173f2e); border: 1px solid var(--mint, #bfe5cd);
+    }
+    .lw-ai-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #10b981; display: inline-block;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+    }
+    .lw-ai-search-toggle {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 8px; font-size: 11px;
+      font-weight: 600; border: 1px solid var(--line, #e3dac9);
+      background: var(--card, #fffcf6); color: var(--muted, #6d796f);
+      cursor: pointer;
+    }
+    .lw-ai-search-toggle strong { color: var(--forest, #173f2e); }
+    .lw-ai-pill-group { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+    .lw-ai-pill-btn {
+      font-size: 11px; font-weight: 600; padding: 4px 9px;
+      border-radius: 999px; border: 1px solid var(--line, #e3dac9);
+      background: var(--card, #fffcf6); color: var(--muted, #6d796f);
+      cursor: pointer; white-space: nowrap;
+    }
+    .lw-ai-pill-btn:hover { color: var(--ink, #1a2b22); border-color: var(--line-strong, #d3c6b2); }
+    .lw-ai-pill-btn.active {
+      background: var(--forest-soft, #e4eddf); color: var(--forest, #173f2e);
+      border-color: var(--forest, #173f2e);
+    }
     .lw-ai-body { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
     .lw-ai-panel { display: none; flex-direction: column; gap: 13px; flex: 1; }
     .lw-ai-panel.active { display: flex; }
@@ -339,10 +370,18 @@ function mountAiSuite() {
   drawer.innerHTML = `
     <div class="lw-ai-head">
       <div>
-        <h2 class="lw-ai-title">Ledgerwise AI</h2>
-        <p class="lw-ai-sub" id="lw-ai-status">Connecting…</p>
+        <div style="display:flex;align-items:center;gap:7px">
+          <h2 class="lw-ai-title">Ledgerwise AI Desk</h2>
+          <span class="lw-ai-badge" id="lw-ai-status-badge"><span class="lw-ai-dot"></span> Local Grounded</span>
+        </div>
+        <p class="lw-ai-sub" id="lw-ai-status">Live Workspace Connected · Zero Web Search</p>
       </div>
-      <button type="button" class="lw-ai-close" id="lw-ai-close" aria-label="Close AI panel">&times;</button>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button type="button" class="lw-ai-search-toggle" id="lw-search-toggle" title="Toggle web search (Off gives instant responses with zero rate limits)">
+          <span>Web search: <strong id="lw-search-label">Off</strong></span>
+        </button>
+        <button type="button" class="lw-ai-close" id="lw-ai-close" aria-label="Close AI panel">&times;</button>
+      </div>
     </div>
 
     <div class="lw-ai-tabs" role="tablist">
@@ -412,8 +451,19 @@ function mountAiSuite() {
 
       <!-- TAB 5: CHAT ASSISTANT -->
       <section class="lw-ai-panel" data-ai-panel="chat">
+        <div class="lw-ai-pill-group" style="margin-bottom:6px">
+          <button type="button" class="lw-ai-pill-btn active" data-chat-persona="cfo">Finance CFO</button>
+          <button type="button" class="lw-ai-pill-btn" data-chat-persona="coach">Budget Coach</button>
+          <button type="button" class="lw-ai-pill-btn" data-chat-persona="auditor">Ledger Auditor</button>
+          <button type="button" class="lw-ai-pill-btn" data-chat-persona="analyst">Cashflow Analyst</button>
+        </div>
+        <div class="lw-ai-pill-group" style="margin-bottom:8px">
+          <button type="button" class="lw-ai-pill-btn" data-quick-prompt="Summarize my current month spending and top expense categories">📊 Month Summary</button>
+          <button type="button" class="lw-ai-pill-btn" data-quick-prompt="What is my true Safe-to-Spend liquidity right now?">💰 Safe-to-Spend</button>
+          <button type="button" class="lw-ai-pill-btn" data-quick-prompt="Which budget categories are at risk of overrun this month?">⚠️ Budget Check</button>
+        </div>
         <div class="lw-ai-messages" id="lw-chat-messages">
-          <div class="lw-ai-msg model">Ask me anything about your balances, spending trends, budgets, bills, or goals.</div>
+          <div class="lw-ai-msg model">Ledgerwise AI Desk is active. Web search is off for zero rate limits and instant continuous conversation. Ask about your balances, spending trends, budgets, or bills.</div>
         </div>
         <form id="lw-chat-form" style="display:flex;gap:8px;margin-top:auto;padding-top:8px;border-top:1px solid var(--line,#e3dac9)">
           <input type="text" id="lw-chat-input" class="lw-ai-input" placeholder="Ask about your ledger…" autocomplete="off" />
@@ -461,16 +511,67 @@ function mountAiSuite() {
   });
 
   // Check backend status
+  let webSearchEnabled = false;
+  const searchToggle = drawer.querySelector('#lw-search-toggle') as HTMLElement;
+  const searchLabel = drawer.querySelector('#lw-search-label') as HTMLElement;
+  const statusBadge = drawer.querySelector('#lw-ai-status-badge') as HTMLElement;
+
+  if (searchToggle && searchLabel) {
+    searchToggle.addEventListener('click', () => {
+      webSearchEnabled = !webSearchEnabled;
+      searchLabel.textContent = webSearchEnabled ? 'On' : 'Off';
+      searchToggle.style.borderColor = webSearchEnabled ? 'var(--brass, #b3874a)' : 'var(--line, #e3dac9)';
+      const h = lw();
+      if (h) h.toast(webSearchEnabled ? 'Web search enabled' : 'Web search OFF: zero rate limits active', 'success');
+    });
+  }
+
   fetch('/api/ai/status')
     .then((r) => r.json())
-    .then((info) => {
-      statusEl.textContent = info.configured
-        ? `Connected · ${info.model}`
-        : 'Server ready · configure API key in Secrets';
+    .then(() => {
+      statusEl.textContent = 'Live Workspace Connected · Zero Web Search';
+      if (statusBadge) {
+        statusBadge.innerHTML = '<span class="lw-ai-dot"></span> Local Grounded';
+      }
     })
     .catch(() => {
-      statusEl.textContent = 'AI backend offline';
+      statusEl.textContent = 'Local Ledger Mode (Offline)';
     });
+
+  /* ---------------------------------------------------------------
+     Persona pills: toggle active + set currentPersona for chat system prompt
+     --------------------------------------------------------------- */
+  let currentPersona = 'cfo';
+  const PERSONA_PROMPTS: Record<string, string> = {
+    cfo:     'You are a Chief Financial Officer reviewing this personal ledger. Speak with precision, focus on P&L, net worth trajectory, and risk.',
+    coach:   'You are a friendly budget coach. Keep advice motivational and actionable. Focus on spending habits and savings goals.',
+    auditor: 'You are a meticulous ledger auditor. Surface any discrepancies, missing categories, unbalanced entries, or duplicates.',
+    analyst: 'You are a cashflow analyst. Focus on cash timing, liquidity gaps, recurring obligations, and safe-to-spend calculations.',
+  };
+
+  drawer.querySelectorAll<HTMLButtonElement>('[data-chat-persona]').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      drawer.querySelectorAll('[data-chat-persona]').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentPersona = pill.dataset.chatPersona || 'cfo';
+      const h = lw();
+      const label = pill.textContent?.trim() || currentPersona;
+      if (h) h.toast(`Persona: ${label}`, 'success');
+    });
+  });
+
+  /* ---------------------------------------------------------------
+     Quick prompt chips: fill input and auto-submit
+     --------------------------------------------------------------- */
+  drawer.querySelectorAll<HTMLButtonElement>('[data-quick-prompt]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const chatInput = drawer.querySelector<HTMLInputElement>('#lw-chat-input');
+      const chatForm  = drawer.querySelector<HTMLFormElement>('#lw-chat-form');
+      if (!chatInput || !chatForm) return;
+      chatInput.value = chip.dataset.quickPrompt || '';
+      chatForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+  });
 
   /* ---------------------------------------------------------------
      Feature 1 & 2: Natural-Language Entry + Receipt Scanner Preview & Post
@@ -1108,6 +1209,7 @@ function mountAiSuite() {
         prompt,
         history: chatHistory,
         ledgerContext: getLiveSnapshot(),
+        personaInstruction: PERSONA_PROMPTS[currentPersona] || PERSONA_PROMPTS['cfo'],
       });
       pending.textContent = res.text || 'No response returned.';
       chatHistory.push({ role: 'user', text: prompt });

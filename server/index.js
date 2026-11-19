@@ -110,7 +110,7 @@ app.get('/api/ai/status', (_req, res) => {
 // 2. Chat Assistant (Strictly grounded in ledger numbers, zero web search)
 app.post('/api/ai/ask', async (req, res) => {
   try {
-    const { prompt, history, ledgerContext, apiKey } = req.body;
+    const { prompt, history, ledgerContext, personaInstruction, apiKey } = req.body;
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ error: 'Prompt is required.' });
     }
@@ -119,10 +119,15 @@ app.post('/api/ai/ask', async (req, res) => {
       ? `\n\nUser Workspace Snapshot (JSON):\n${JSON.stringify(ledgerContext).slice(0, 16000)}`
       : '';
 
+    const personaBlock = personaInstruction
+      ? `\n\nPersona: ${personaInstruction}`
+      : '';
+
     const systemInstruction =
       'You are Ledgerwise AI, the built-in financial assistant for a private double-entry personal ledger and budget tracker.\n' +
       'Be concise, practical, and strictly grounded in the numbers provided. Format amounts clearly in the user\'s workspace currency.\n' +
       'Do NOT perform any external web searching or quote general stock prices unless present in the user\'s ledger context.' +
+      personaBlock +
       contextBlock;
 
     const contents = [];
