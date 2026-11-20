@@ -171,6 +171,96 @@ function getLiveSnapshot() {
   };
 }
 
+
+/**
+ * Deterministic finance answers. Reads the live ledger through window.__lw.
+ * Returns null when a question needs interpretation beyond known ledger facts.
+ */
+function answerFromLedger(prompt: string): string | null {
+  const h = lw();
+  const state = h?.getState();
+  if (!h || !state) return null;
+  const q = prompt.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+  const month = h.getMonth();
+  const currency = state.profile?.currency || 'KES';
+  const money = (cents: number) => {
+    const amount = Number(cents || 0) / 100;
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+    } catch {
+      return currency + ' ' + amount.toFixed(2);
+    }
+  };
+  const totals = h.monthTotals(month);
+  const budget = h.budgetTotals(month);
+  const safe = h.safeToSpend();
+  const accountTotals = h.accountTotals();
+  const accounts = h.activeAccounts();
+  const categories = [...h.categoriesOf('expense'), ...h.categoriesOf('income')];
+  const monthLabel = (key: string) => {
+    const parts = key.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  };
+
+  if (/\bnet worth\b/.test(q)) {
+    return 'Your current net worth is ' + money(accountTotals.net) + ' (assets ' + money(accountTotals.assets) + ' less liabilities ' + money(accountTotals.liabilities) + ').';
+  }
+  if (/\bassets?\b/.test(q) && !/\bliabilit/.test(q)) return 'Your recorded assets total ' + money(accountTotals.assets) + '.';
+  if (/\bliabilit|owe\b/.test(q)) return 'Your recorded liabilities total ' + money(accountTotals.liabilities) + '.';
+  if (/\b(balance|balances)\b/.test(q)) {
+    const named = accounts.find((a: any) => q.includes(String(a.name || '').toLocaleLowerCase()));
+    if (named) return named.name + ' currently has a balance of ' + money(h.accountBalance(named.id)) + '.';
+    return 'Across your accounts, assets are ' + money(accountTotals.assets) + ', liabilities are ' + money(accountTotals.liabilities) + ', and net worth is ' + money(accountTotals.net) + '.';
+  }
+
+  if (/\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q)) {
+    return 'Your safe-to-spend amount is ' + money(safe.safe) + '. This starts with liquid funds of ' + money(safe.liquid) + ', then subtracts upcoming bills (' + money(safe.bills) + '), goal reserves (' + money(safe.reserved) + '), and your buffer (' + money(safe.buffer) + ') over the next ' + safe.window + ' days.';
+  }
+
+  const previous = /\b(last month|previous month)\b/.test(q);
+  const monthKey = previous ? h.addMonthsKey(month, -1) : month;
+  const selectedTotals = previous ? h.monthTotals(monthKey) : totals;
+  const selectedBudget = previous ? h.budgetTotals(monthKey) : budget;
+  const label = monthLabel(monthKey);
+  const asksIncome = /\b(income|earned|earnings|received)\b/.test(q);
+  const asksExpense = /\b(spent|spending|expenses?|expense total)\b/.test(q);
+  const asksNet = /\b(net|surplus|deficit|cash ?flow)\b/.test(q);
+
+  if (asksIncome && !asksExpense && !asksNet) return 'Your recorded income for ' + label + ' is ' + money(selectedTotals.income) + '.';
+  if (asksExpense && !asksIncome && !asksNet) {
+    const category = categories.find((c: any) => c.type === 'expense' && q.includes(String(c.name || '').toLocaleLowerCase()));
+    if (category) {
+      const amount = selectedTotals.byCategory.get(category.id) || 0;
+      return 'You spent ' + money(amount) + ' in ' + category.name + ' during ' + label + '.';
+    }
+    return 'Your recorded expenses for ' + label + ' total ' + money(selectedTotals.expense) + '.';
+  }
+  if (asksNet) {
+    const net = selectedTotals.income - selectedTotals.expense;
+    return 'For ' + label + ', income was ' + money(selectedTotals.income) + ' and expenses were ' + money(selectedTotals.expense) + ', leaving a net ' + (net >= 0 ? 'surplus' : 'deficit') + ' of ' + money(Math.abs(net)) + '.';
+  }
+
+  if (/\b(budget|budgets|overspent|over budget)\b/.test(q)) {
+    if (!selectedBudget.rows?.length) return 'There are no budget limits recorded for ' + label + '.';
+    const rows = selectedBudget.rows as any[];
+    const over = rows.filter((r) => r.spentCents > r.limitCents);
+    const remaining = selectedBudget.limit - selectedBudget.spent;
+    const summary = 'For ' + label + ', you have used ' + money(selectedBudget.spent) + ' of ' + money(selectedBudget.limit) + ' in recorded budgets; ' + (remaining >= 0 ? money(remaining) + ' remains' : money(Math.abs(remaining)) + ' over budget') + '.';
+    if (/overspent|over budget/.test(q)) {
+      return over.length
+        ? summary + ' Over-budget categories: ' + over.map((r) => (r.category?.name || 'Unnamed') + ' (' + money(r.spentCents - r.limitCents) + ' over)').join(', ') + '.'
+        : summary + ' No budget category is currently over its limit.';
+    }
+    return summary;
+  }
+
+  if (/\b(account|accounts|wallets)\b/.test(q) && /\b(list|show|which|my|balances?)\b/.test(q)) {
+    if (!accounts.length) return 'There are no active accounts in your ledger.';
+    return 'Your active account balances: ' + accounts.map((a: any) => a.name + ': ' + money(h.accountBalance(a.id))).join('; ') + '.';
+  }
+  return null;
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -1205,15 +1295,22 @@ function mountAiSuite() {
     const pending = appendChat('lw-ai-msg model', 'Thinking…');
 
     try {
-      const res = await postJson<{ text: string }>('/api/ai/ask', {
-        prompt,
-        history: chatHistory,
-        ledgerContext: getLiveSnapshot(),
-        personaInstruction: PERSONA_PROMPTS[currentPersona] || PERSONA_PROMPTS['cfo'],
-      });
-      pending.textContent = res.text || 'No response returned.';
-      chatHistory.push({ role: 'user', text: prompt });
-      chatHistory.push({ role: 'model', text: res.text });
+      const localAnswer = answerFromLedger(prompt);
+      if (localAnswer) {
+        pending.textContent = localAnswer + '\n\nAnswered directly from your live ledger. No AI request was sent.';
+        chatHistory.push({ role: 'user', text: prompt });
+        chatHistory.push({ role: 'model', text: localAnswer });
+      } else {
+        const res = await postJson<{ text: string }>('/api/ai/ask', {
+          prompt,
+          history: chatHistory,
+          ledgerContext: getLiveSnapshot(),
+          personaInstruction: PERSONA_PROMPTS[currentPersona] || PERSONA_PROMPTS['cfo'],
+        });
+        pending.textContent = res.text || 'No response returned.';
+        chatHistory.push({ role: 'user', text: prompt });
+        chatHistory.push({ role: 'model', text: res.text });
+      }
     } catch (err) {
       pending.remove();
       appendChat('lw-ai-err', err instanceof Error ? err.message : 'Unable to reach AI.');
