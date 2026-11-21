@@ -84,7 +84,9 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
         add('acc_mpesa', 0, amountCents + feeCents);
       } else if (item.type === 'ziidi_withdrawal' || item.type === 'mshwari_withdrawal') {
         add('acc_mpesa', amountCents, 0);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
         add(item.suggestedCategory, 0, amountCents);
+        if (feeCents > 0) add('acc_mpesa', 0, feeCents);
       } else if (item.type === 'cash_withdrawal') {
         add('acc_cash', amountCents, 0);
         if (feeCents > 0) add('cat_fees', feeCents, 0);
