@@ -92,22 +92,6 @@ function parseLocalSms(rawText) {
     }
   }
 
-  if (/you have received|received ksh|deposited ksh|money received/i.test(lower)) {
-    const counterparty = nameAfter(/(?:from|by)\s+(.+?)(?:\s+\d{9,}| on \d{1,2}\/|\.\s|$)/i, 'Incoming sender');
-    const bankTransfer = /equity|kcb|co-operative|coop|stanbic|ncba|m-shwari|mshwari/i.test(counterparty + ' ' + text);
-    return set({
-      direction: 'in',
-      type: bankTransfer ? 'account_transfer' : 'income',
-      counterparty,
-      suggestedCategory: bankTransfer ? 'acc_bank' : 'cat_income',
-      debitAccount: 'acc_mpesa',
-      creditAccount: bankTransfer ? 'acc_bank' : 'cat_income',
-      confidence: receipt && amount > 0 ? 0.94 : 0.72,
-      needsReview: !(receipt && amount > 0),
-      reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
-    });
-  }
-
   if (/m-shwari|mshwari/i.test(lower)) {
     const deposit = /to\s+m-?shwari|deposit(?:ed)?\s+to\s+m-?shwari/i.test(lower);
     return set({
@@ -118,6 +102,25 @@ function parseLocalSms(rawText) {
       debitAccount: deposit ? 'acc_mshwari' : 'acc_mpesa',
       creditAccount: deposit ? 'acc_mpesa' : 'acc_mshwari',
       confidence: receipt && amount > 0 ? 0.96 : 0.72,
+      needsReview: !(receipt && amount > 0),
+      reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
+    });
+  }
+
+  if (/you have received|received ksh|deposited ksh|money received/i.test(lower)) {
+    const counterparty = nameAfter(/(?:from|by)\s+(.+?)(?:\s+\d{9,}| on \d{1,2}\/|\.\s|$)/i, 'Incoming sender');
+    const bankTransfer = /equity|kcb|co-operative|coop|stanbic|ncba/i.test(counterparty + ' ' + text);
+    if (bankTransfer && !/kcb/i.test(counterparty + ' ' + text)) {
+      return set({ direction: 'in', type: 'review_transfer', counterparty, suggestedCategory: 'review', confidence: 0.9, needsReview: true, reviewReason: 'Bank transfer detected but no matching ledger account exists; map the actual bank account before importing' });
+    }
+    return set({
+      direction: 'in',
+      type: bankTransfer ? 'account_transfer' : 'income',
+      counterparty,
+      suggestedCategory: bankTransfer ? 'acc_bank' : 'cat_income',
+      debitAccount: 'acc_mpesa',
+      creditAccount: bankTransfer ? 'acc_bank' : 'cat_income',
+      confidence: receipt && amount > 0 ? 0.94 : 0.72,
       needsReview: !(receipt && amount > 0),
       reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
     });
@@ -179,6 +182,9 @@ function parseLocalSms(rawText) {
 
   if (/sent\s+to|transfer(?:red)?\s+to|customer transfer/i.test(lower) && /equity|kcb|co-operative|cooperative|coop|stanbic|ncba/i.test(lower)) {
     const bank = /equity/i.test(lower) ? 'Equity Bank' : /kcb/i.test(lower) ? 'KCB Bank' : /co-?operative|coop/i.test(lower) ? 'Co-operative Bank' : /stanbic/i.test(lower) ? 'Stanbic Bank' : 'NCBA Bank';
+    if (!/kcb/i.test(lower)) {
+      return set({ type: 'review_transfer', counterparty: bank, suggestedCategory: 'review', confidence: 0.9, needsReview: true, reviewReason: 'Bank transfer detected but no matching ledger account exists; map the actual bank account before importing' });
+    }
     return set({
       type: 'account_transfer',
       direction: 'out',
