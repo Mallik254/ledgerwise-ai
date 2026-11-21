@@ -47,3 +47,12 @@ test('reversal is flagged for matching rather than imported as income/expense', 
   assert.equal(row.type, 'reversal');
   assert.equal(row.needsReview, true);
 });
+
+test('standalone M-Pesa charge SMS becomes a fee expense', () => {
+  const row = parseLocalSms('TG12345678 Confirmed. Customer Transfer of Funds Charge Ksh11.00 on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh3,239.00.');
+  assert.equal(row.type, 'transaction_fee');
+  assert.equal(row.suggestedCategory, 'cat_fees');
+  assert.equal(row.amount, 11);
+  assert.equal(row.fee, 0);
+  assert.equal(row.needsReview, false);
+});
