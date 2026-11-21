@@ -230,6 +230,16 @@ function answerFromLedger(prompt: string): string | null {
   const asksExpense = /\b(spend|spends|spent|spending|expenses?|expense total)\b/.test(q);
   const asksNet = /\b(net|surplus|deficit|cash ?flow)\b/.test(q);
 
+  if (/\b(top|highest|most|biggest)\b/.test(q) && /\b(category|categories|spend|spending|spent)\b/.test(q)) {
+    const ranked = [...selectedTotals.byCategory.entries()]
+      .filter(([, amount]) => amount > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (!ranked.length) return 'There is no recorded category spending for ' + label + '.';
+    const [categoryId, amount] = ranked[0];
+    const category = h.categoryById(categoryId);
+    return 'Your highest spending category for ' + label + ' is ' + (category?.name || 'Uncategorized') + ' at ' + money(amount) + '.';
+  }
+
   if (asksIncome && !asksExpense && !asksNet) return 'Your recorded income for ' + label + ' is ' + money(selectedTotals.income) + '.';
   if (asksExpense && !asksIncome && !asksNet) {
     const category = categories.find((c: any) => c.type === 'expense' && q.includes(String(c.name || '').toLocaleLowerCase()));
@@ -242,16 +252,6 @@ function answerFromLedger(prompt: string): string | null {
   if (asksNet) {
     const net = selectedTotals.income - selectedTotals.expense;
     return 'For ' + label + ', income was ' + money(selectedTotals.income) + ' and expenses were ' + money(selectedTotals.expense) + ', leaving a net ' + (net >= 0 ? 'surplus' : 'deficit') + ' of ' + money(Math.abs(net)) + '.';
-  }
-
-  if (/\b(top|highest|most|biggest)\b/.test(q) && /\b(category|categories|spending|spent)\b/.test(q)) {
-    const ranked = [...selectedTotals.byCategory.entries()]
-      .filter(([, amount]) => amount > 0)
-      .sort((a, b) => b[1] - a[1]);
-    if (!ranked.length) return 'There is no recorded category spending for ' + label + '.';
-    const [categoryId, amount] = ranked[0];
-    const category = h.categoryById(categoryId);
-    return 'Your highest spending category for ' + label + ' is ' + (category?.name || 'Uncategorized') + ' at ' + money(amount) + '.';
   }
 
   if (/\b(budget|budgets|overspent|over budget)\b/.test(q)) {
