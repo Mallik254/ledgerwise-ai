@@ -241,6 +241,10 @@ function answerFromLedger(prompt: string): string | null {
     return 'Your highest spending category for ' + label + ' is ' + (category?.name || 'Uncategorized') + ' at ' + money(amount) + '.';
   }
 
+  if (asksIncome && asksExpense && !asksNet) {
+    const net = selectedTotals.income - selectedTotals.expense;
+    return 'For ' + label + ', recorded income was ' + money(selectedTotals.income) + ', expenses were ' + money(selectedTotals.expense) + ', and the net result was ' + money(Math.abs(net)) + (net >= 0 ? ' surplus.' : ' deficit.');
+  }
   if (asksIncome && !asksExpense && !asksNet) return 'Your recorded income for ' + label + ' is ' + money(selectedTotals.income) + '.';
   if (asksExpense && !asksIncome && !asksNet) {
     const category = categories.find((c: any) => c.type === 'expense' && q.includes(String(c.name || '').toLocaleLowerCase()));
