@@ -63,3 +63,24 @@ test('known bank transfer is treated as an account transfer', () => {
   assert.equal(row.suggestedCategory, 'acc_bank');
   assert.equal(row.needsReview, false);
 });
+
+test('M-Shwari withdrawal is not mistaken for a generic bank transfer', () => {
+  const row = parseLocalSms('TJ12345678 Confirmed. You have received Ksh2,000.00 from M-SHWARI on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh5,000.00.');
+  assert.equal(row.type, 'mshwari_withdrawal');
+  assert.equal(row.suggestedCategory, 'acc_mshwari');
+  assert.equal(row.needsReview, false);
+});
+
+test('incoming transfer from an unmapped bank is held for account mapping', () => {
+  const row = parseLocalSms('TK12345678 Confirmed. You have received Ksh2,000.00 from NCBA BANK on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh5,000.00.');
+  assert.equal(row.type, 'review_transfer');
+  assert.equal(row.needsReview, true);
+  assert.match(row.reviewReason, /no matching ledger account/);
+});
+
+test('outgoing transfer to an unmapped bank is held for account mapping', () => {
+  const row = parseLocalSms('TL12345678 Confirmed. Ksh2,000.00 sent to CO-OPERATIVE BANK on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh5,000.00.');
+  assert.equal(row.type, 'review_transfer');
+  assert.equal(row.needsReview, true);
+  assert.match(row.reviewReason, /no matching ledger account/);
+});
