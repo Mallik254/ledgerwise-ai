@@ -58,7 +58,7 @@ test('standalone M-Pesa charge SMS becomes a fee expense', () => {
 });
 
 test('known bank transfer is treated as an account transfer', () => {
-  const row = parseLocalSms('TH12345678 Confirmed. Ksh3,000.00 sent to CO-OPERATIVE BANK on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh1,000.00. Transaction cost, Ksh25.00.');
+  const row = parseLocalSms('TH12345678 Confirmed. Ksh3,000.00 sent to KCB BANK on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh1,000.00. Transaction cost, Ksh25.00.');
   assert.equal(row.type, 'account_transfer');
   assert.equal(row.suggestedCategory, 'acc_bank');
   assert.equal(row.needsReview, false);
