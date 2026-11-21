@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MessageSquareText, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, X, Cpu, RefreshCw, Check } from 'lucide-react';
 import { ParsedAiTransaction, Transaction } from '../types';
-import { formatKes } from '../lib/doubleEntryEngine';
+import { formatKes, validateLedgerEntries } from '../lib/doubleEntryEngine';
 import { ThemeConfig } from '../lib/themes';
 
 interface SmsAiImporterModalProps {
@@ -125,6 +125,17 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
         entries
       };
     });
+
+    // Hard stop: never write a malformed or unbalanced journal entry to the ledger.
+    const invalid = newTransactions.filter(tx =>
+      !Number.isSafeInteger(tx.amountCents) ||
+      tx.amountCents <= 0 ||
+      !validateLedgerEntries(tx.entries)
+    );
+    if (invalid.length > 0) {
+      setError(`Import blocked: ${invalid.length} transaction(s) failed the double-entry balance check. Nothing was imported.`);
+      return;
+    }
 
     // Keep legitimate paired rows sharing a receipt; only suppress exact duplicate rows in this batch.
     const seen = new Set<string>();
