@@ -32,7 +32,10 @@ export const App: React.FC = () => {
   // Ledger state
   const [accounts, setAccounts] = useState<Account[]>(() => {
     const saved = localStorage.getItem('ledgerwise_accounts');
-    if (!saved) return INITIAL_ACCOUNTS;\n    const stored: Account[] = JSON.parse(saved);\n    // Add newly supported asset accounts without disturbing existing user accounts or balances.\n    return INITIAL_ACCOUNTS.filter(account => account.id === 'acc_ziidi' && !stored.some(existing => existing.id === account.id)).concat(stored);
+    if (!saved) return INITIAL_ACCOUNTS;
+    const stored: Account[] = JSON.parse(saved);
+    // Add newly supported asset accounts without disturbing existing user accounts or balances.
+    return INITIAL_ACCOUNTS.filter(account => account.id === 'acc_ziidi' && !stored.some(existing => existing.id === account.id)).concat(stored);
   });
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
