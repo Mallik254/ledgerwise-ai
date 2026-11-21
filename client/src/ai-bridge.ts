@@ -223,7 +223,7 @@ function answerFromLedger(prompt: string): string | null {
   const selectedBudget = previous ? h.budgetTotals(monthKey) : budget;
   const label = monthLabel(monthKey);
   const asksIncome = /\b(income|earned|earnings|received)\b/.test(q);
-  const asksExpense = /\b(spent|spending|expenses?|expense total)\b/.test(q);
+  const asksExpense = /\b(spend|spends|spent|spending|expenses?|expense total)\b/.test(q);
   const asksNet = /\b(net|surplus|deficit|cash ?flow)\b/.test(q);
 
   if (asksIncome && !asksExpense && !asksNet) return 'Your recorded income for ' + label + ' is ' + money(selectedTotals.income) + '.';
