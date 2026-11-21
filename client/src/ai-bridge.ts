@@ -202,10 +202,11 @@ function answerFromLedger(prompt: string): string | null {
     return new Date(parts[0], parts[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   };
 
-  // Do not answer a historical or custom-period question with a current/monthly figure.
+  // Keep current-only facts separate from questions about a historical period.
   const unsupportedPeriod = /\b(this year|last year|year to date|past \d+ months?|last \d+ months?|past week|last week|today|yesterday|in (january|february|march|april|may|june|july|august|september|october|november|december)|20\d{2})\b/.test(q);
   const safeSpendQuestion = /\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q);
   if (unsupportedPeriod && !safeSpendQuestion) return null;
+
 
   if (/\bnet worth\b/.test(q)) {
     return 'Your current net worth is ' + money(accountTotals.net) + ' (assets ' + money(accountTotals.assets) + ' less liabilities ' + money(accountTotals.liabilities) + ').';
@@ -216,6 +217,32 @@ function answerFromLedger(prompt: string): string | null {
     const named = accounts.find((a: any) => q.includes(String(a.name || '').toLocaleLowerCase()));
     if (named) return named.name + ' currently has a balance of ' + money(h.accountBalance(named.id)) + '.';
     return 'Across your accounts, assets are ' + money(accountTotals.assets) + ', liabilities are ' + money(accountTotals.liabilities) + ', and net worth is ' + money(accountTotals.net) + '.';
+  }
+
+
+  // Search recent ledger entries locally; exclude reversals and reversed originals.
+  if (/\b(transactions?|entries|payments?|purchases?|receipts?)\b/.test(q)) {
+    const all = (state.transactions || [])
+      .filter((t: any) => t.type !== 'reversal' && !t.reversedBy)
+      .sort((a: any, b: any) => String(b.date || '').localeCompare(String(a.date || '')));
+    const namedCategory = categories.find((c: any) => q.includes(String(c.name || '').toLocaleLowerCase()));
+    const searchTerms = q
+      .replace(/\b(show|list|find|search|my|recent|latest|last|transactions?|entries|payments?|purchases?|receipts?|for|from|in|the|a|an|of|what|were|was|did|i|spend|spent|pay|paid)\b/g, ' ')
+      .split(/\s+/).filter((term) => term.length >= 3);
+    const matches = all.filter((t: any) => {
+      const categoryName = t.categoryId ? h.categoryById(t.categoryId)?.name : '';
+      const haystack = [t.payee, t.description, t.notes, categoryName].join(' ').toLocaleLowerCase();
+      return (!namedCategory || t.categoryId === namedCategory.id) &&
+        (!searchTerms.length || searchTerms.some((term) => haystack.includes(term)));
+    });
+    const requested = q.match(/\b(?:last|latest)\s+(\d{1,2})\b/);
+    const limit = Math.min(20, Math.max(1, requested ? Number(requested[1]) : 5));
+    if (!matches.length) return 'I could not find matching transactions in your recorded ledger.';
+    return 'Matching ledger entries:\\n' + matches.slice(0, limit).map((t: any) => {
+      const categoryName = t.categoryId ? h.categoryById(t.categoryId)?.name : 'Uncategorised';
+      const amount = money(t.amountCents || 0);
+      return String(t.date || 'Date not recorded') + ' — ' + (t.payee || t.description || 'Entry') + ' — ' + categoryName + ' — ' + amount + ' (' + t.type + ')';
+    }).join('\\n');
   }
 
   if (/\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q)) {
