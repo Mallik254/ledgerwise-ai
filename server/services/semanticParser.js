@@ -177,7 +177,7 @@ function parseLocalSms(rawText) {
     return set({ type: 'merchant_payment', counterparty, suggestedCategory: category, confidence: receipt && amount > 0 ? 0.88 : 0.65, needsReview: !(receipt && amount > 0), reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount' });
   }
 
-  if (/sent\\s+to|transfer(?:red)?\\s+to|customer transfer/i.test(lower) && /equity|kcb|co-operative|cooperative|coop|stanbic|ncba/i.test(lower)) {
+  if (/sent\s+to|transfer(?:red)?\s+to|customer transfer/i.test(lower) && /equity|kcb|co-operative|cooperative|coop|stanbic|ncba/i.test(lower)) {
     const bank = /equity/i.test(lower) ? 'Equity Bank' : /kcb/i.test(lower) ? 'KCB Bank' : /co-?operative|coop/i.test(lower) ? 'Co-operative Bank' : /stanbic/i.test(lower) ? 'Stanbic Bank' : 'NCBA Bank';
     return set({
       type: 'account_transfer',
