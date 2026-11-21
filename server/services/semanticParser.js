@@ -124,7 +124,7 @@ function parseLocalSms(rawText) {
   }
 
   if (/transfer of funds charge|pay bill charge|transaction charge|transaction cost|withdrawal charge/i.test(lower) && amount === 0) {
-    const charge = fee || extractMoney(text, /(?:Ksh|KES)\\.?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)/i) || 0;
+    const charge = fee || extractMoney(text, /(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i) || 0;
     return set({
       amount: charge,
       fee: 0,
