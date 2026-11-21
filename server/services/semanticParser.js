@@ -107,19 +107,42 @@ function parseLocalSms(rawText) {
     });
   }
 
+  // Small Business wallet movements are internal wallet transfers, not income or expenses.
+  if (/small business wallet|business wallet|business account wallet/i.test(lower)) {
+    return set({
+      type: 'review_transfer',
+      counterparty: 'M-Pesa Small Business Wallet',
+      suggestedCategory: 'review',
+      confidence: 0.92,
+      needsReview: true,
+      reviewReason: 'Small Business wallet movement must be matched to its paired wallet record before importing'
+    });
+  }
+
   if (/you have received|received ksh|deposited ksh|money received/i.test(lower)) {
     const counterparty = nameAfter(/(?:from|by)\s+(.+?)(?:\s+\d{9,}| on \d{1,2}\/|\.\s|$)/i, 'Incoming sender');
     const bankTransfer = /equity|kcb|co-operative|coop|stanbic|ncba/i.test(counterparty + ' ' + text);
     if (bankTransfer && !/kcb/i.test(counterparty + ' ' + text)) {
       return set({ direction: 'in', type: 'review_transfer', counterparty, suggestedCategory: 'review', confidence: 0.9, needsReview: true, reviewReason: 'Bank transfer detected but no matching ledger account exists; map the actual bank account before importing' });
     }
+    if (!bankTransfer) {
+      return set({
+        direction: 'in',
+        type: 'review_transfer',
+        counterparty,
+        suggestedCategory: 'review',
+        confidence: receipt && amount > 0 ? 0.9 : 0.65,
+        needsReview: true,
+        reviewReason: 'Incoming person-to-person payment: confirm whether this is income or a transfer from your own account before importing'
+      });
+    }
     return set({
       direction: 'in',
-      type: bankTransfer ? 'account_transfer' : 'income',
+      type: 'account_transfer',
       counterparty,
-      suggestedCategory: bankTransfer ? 'acc_bank' : 'cat_income',
+      suggestedCategory: 'acc_bank',
       debitAccount: 'acc_mpesa',
-      creditAccount: bankTransfer ? 'acc_bank' : 'cat_income',
+      creditAccount: 'acc_bank',
       confidence: receipt && amount > 0 ? 0.94 : 0.72,
       needsReview: !(receipt && amount > 0),
       reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
