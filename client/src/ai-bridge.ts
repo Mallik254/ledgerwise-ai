@@ -217,6 +217,10 @@ function answerFromLedger(prompt: string): string | null {
     return 'Your safe-to-spend amount is ' + money(safe.safe) + '. This starts with liquid funds of ' + money(safe.liquid) + ', then subtracts upcoming bills (' + money(safe.bills) + '), goal reserves (' + money(safe.reserved) + '), and your buffer (' + money(safe.buffer) + ') over the next ' + safe.window + ' days.';
   }
 
+  // Do not silently label a monthly total as a year, week, or custom date-range total.
+  const unsupportedPeriod = /\b(this year|last year|year to date|past \d+ months?|last \d+ months?|past week|last week|today|yesterday|in (january|february|march|april|may|june|july|august|september|october|november|december)|20\d{2})\b/.test(q);
+  if (unsupportedPeriod) return null;
+
   const previous = /\b(last month|previous month)\b/.test(q);
   const monthKey = previous ? h.addMonthsKey(month, -1) : month;
   const selectedTotals = previous ? h.monthTotals(monthKey) : totals;
@@ -238,6 +242,16 @@ function answerFromLedger(prompt: string): string | null {
   if (asksNet) {
     const net = selectedTotals.income - selectedTotals.expense;
     return 'For ' + label + ', income was ' + money(selectedTotals.income) + ' and expenses were ' + money(selectedTotals.expense) + ', leaving a net ' + (net >= 0 ? 'surplus' : 'deficit') + ' of ' + money(Math.abs(net)) + '.';
+  }
+
+  if (/\b(top|highest|most|biggest)\b/.test(q) && /\b(category|categories|spending|spent)\b/.test(q)) {
+    const ranked = [...selectedTotals.byCategory.entries()]
+      .filter(([, amount]) => amount > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (!ranked.length) return 'There is no recorded category spending for ' + label + '.';
+    const [categoryId, amount] = ranked[0];
+    const category = h.categoryById(categoryId);
+    return 'Your highest spending category for ' + label + ' is ' + (category?.name || 'Uncategorized') + ' at ' + money(amount) + '.';
   }
 
   if (/\b(budget|budgets|overspent|over budget)\b/.test(q)) {
