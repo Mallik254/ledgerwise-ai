@@ -123,6 +123,21 @@ function parseLocalSms(rawText) {
     });
   }
 
+  if (/transfer of funds charge|pay bill charge|transaction charge|transaction cost|withdrawal charge/i.test(lower) && amount === 0) {
+    const charge = fee || extractMoney(text, /(?:Ksh|KES)\\.?\\s*([0-9,]+(?:\\.[0-9]{1,2})?)/i) || 0;
+    return set({
+      amount: charge,
+      fee: 0,
+      type: 'transaction_fee',
+      direction: 'out',
+      counterparty: 'M-Pesa Transaction Charge',
+      suggestedCategory: 'cat_fees',
+      confidence: receipt && charge > 0 ? 0.97 : 0.7,
+      needsReview: !(receipt && charge > 0),
+      reviewReason: receipt && charge > 0 ? '' : 'Missing receipt or charge amount'
+    });
+  }
+
   if (/fuliza|overdraft|od loan/i.test(lower)) {
     return set({ type: 'fuliza_review', counterparty: 'Fuliza', suggestedCategory: 'acc_fuliza', confidence: 0.95, reviewReason: 'Fuliza funding or repayment must be matched to the loan liability before posting' });
   }
