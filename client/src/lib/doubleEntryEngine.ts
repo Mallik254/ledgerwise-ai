@@ -5,6 +5,7 @@ export const INITIAL_ACCOUNTS: Account[] = [
   { id: 'acc_bank', name: 'KCB Bank Current', type: 'bank', nature: 'asset', balanceCents: 6500000, institution: 'KCB Bank', spendable: true, color: '#3b82f6' },
   { id: 'acc_cash', name: 'Cash Wallet', type: 'cash', nature: 'asset', balanceCents: 350000, spendable: true, color: '#f59e0b' },
   { id: 'acc_mshwari', name: 'M-Shwari Lock Savings', type: 'savings', nature: 'asset', balanceCents: 4500000, institution: 'NCBA', spendable: false, color: '#8b5cf6' },
+  { id: 'acc_ziidi', name: 'Ziidi Money Market Fund', type: 'savings', nature: 'asset', balanceCents: 0, institution: 'Safaricom Ziidi', spendable: false, color: '#0d9488' },
   { id: 'acc_fuliza', name: 'Fuliza Overdraft', type: 'overdraft', nature: 'liability', balanceCents: 0, institution: 'Safaricom', spendable: false, color: '#ef4444' },
 
   // Expenses
