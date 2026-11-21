@@ -202,6 +202,11 @@ function answerFromLedger(prompt: string): string | null {
     return new Date(parts[0], parts[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   };
 
+  // Do not answer a historical or custom-period question with a current/monthly figure.
+  const unsupportedPeriod = /\b(this year|last year|year to date|past \d+ months?|last \d+ months?|past week|last week|today|yesterday|in (january|february|march|april|may|june|july|august|september|october|november|december)|20\d{2})\b/.test(q);
+  const safeSpendQuestion = /\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q);
+  if (unsupportedPeriod && !safeSpendQuestion) return null;
+
   if (/\bnet worth\b/.test(q)) {
     return 'Your current net worth is ' + money(accountTotals.net) + ' (assets ' + money(accountTotals.assets) + ' less liabilities ' + money(accountTotals.liabilities) + ').';
   }
@@ -216,10 +221,6 @@ function answerFromLedger(prompt: string): string | null {
   if (/\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q)) {
     return 'Your safe-to-spend amount is ' + money(safe.safe) + '. This starts with liquid funds of ' + money(safe.liquid) + ', then subtracts upcoming bills (' + money(safe.bills) + '), goal reserves (' + money(safe.reserved) + '), and your buffer (' + money(safe.buffer) + ') over the next ' + safe.window + ' days.';
   }
-
-  // Do not silently label a monthly total as a year, week, or custom date-range total.
-  const unsupportedPeriod = /\b(this year|last year|year to date|past \d+ months?|last \d+ months?|past week|last week|today|yesterday|in (january|february|march|april|may|june|july|august|september|october|november|december)|20\d{2})\b/.test(q);
-  if (unsupportedPeriod) return null;
 
   const previous = /\b(last month|previous month)\b/.test(q);
   const monthKey = previous ? h.addMonthsKey(month, -1) : month;
