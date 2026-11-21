@@ -14,6 +14,9 @@ app.use(cors());
 app.use(express.json({ limit: '35mb' }));
 app.use(express.urlencoded({ extended: true, limit: '35mb' }));
 
+// Mount the AI routes used by the client, including the deterministic M-Pesa SMS importer.
+app.use('/api/ai', require('./routes/ai'));
+
 /**
  * Direct Gemini API caller with zero external web search and automatic fallback
  */

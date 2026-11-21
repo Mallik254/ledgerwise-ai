@@ -1,125 +1,50 @@
 /**
- * Resilient M-Pesa & Mobile Money Semantic Parser
- * Features:
- * - Dual Engine: Cloud AI (Gemini 1.5/2.0 Flash) + Zero-Cost Local Heuristic Engine
- * - Zero Dropped Transactions: Ambiguous messages are flagged for review rather than dropped
- * - Strict M-Pesa receipt extraction (10-character alphanumeric, e.g. TAH89XJ4K2)
- * - Explicit Fee & Balance extraction
- * - Fuliza overdraft detection
+ * Deterministic Safaricom M-Pesa SMS parser.
+ * Financial safety rules:
+ * - Never turn an unrecognised person-to-person transfer into an expense.
+ * - Ziidi movements are asset-to-asset investment transfers.
+ * - Fees are kept separate from principal.
+ * - Reversals and ambiguous Fuliza/loan cases remain review-only.
  */
+function moneyValue(value) {
+  return Number(String(value || '').replace(/,/g, ''));
+}
 
-// Local Deterministic Resilient Parser
+function extractMoney(text, pattern) {
+  const match = text.match(pattern);
+  return match ? moneyValue(match[1]) : null;
+}
+
 function parseLocalSms(rawText) {
-  const text = String(rawText || '').replace(/\r\n/g, '\n').trim();
+  const text = String(rawText || '').trim();
   if (!text) return null;
-
-  // Extract Receipt: M-Pesa receipts always begin with a letter (e.g. S, T, R) followed by 9 alphanumeric chars
   const receiptMatch = text.match(/\b([A-Z][A-Z0-9]{9})\b/);
-  const receipt = receiptMatch ? receiptMatch[1] : `TEMP-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-
-  // Extract Amount (e.g., Ksh1,500.00, Ksh 500, KES 250.00)
-  const amountMatch = text.match(/(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
-  let amount = 0;
-  if (amountMatch) {
-    amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-  }
-
-  // Extract Balance (e.g. "New M-PESA balance is Ksh4,520.50", "balance is Ksh 120.00")
-  const balanceMatch = text.match(/(?:new\s+)?(?:m-?pesa|account)\s+balance\s*(?:is|was|:)?\s*(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
-  let balance = null;
-  if (balanceMatch) {
-    balance = parseFloat(balanceMatch[1].replace(/,/g, ''));
-  }
-
-  // Extract Transaction Cost / Fee (e.g., "Transaction cost, Ksh15.00", "Transaction cost: Ksh 0.00")
-  const feeMatch = text.match(/(?:Transaction\s+cost|cost|fee)\s*[,:]?\s*(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
-  let fee = 0;
-  if (feeMatch) {
-    fee = parseFloat(feeMatch[1].replace(/,/g, ''));
-  }
-
-  // Extract Date & Time (e.g., "on 18/11/26 at 2:45 PM", "on 18/11/2026 at 14:30")
-  let date = new Date().toISOString().split('T')[0];
-  const dateMatch = text.match(/\bon\s+([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})\b/i);
-  if (dateMatch) {
-    const parts = dateMatch[1].split('/');
-    if (parts.length === 3) {
-      const day = parts[0].padStart(2, '0');
-      const month = parts[1].padStart(2, '0');
-      let year = parts[2];
-      if (year.length === 2) year = '20' + year;
-      date = `${year}-${month}-${day}`;
-    }
-  }
-
-  let time = '';
-  const timeMatch = text.match(/\bat\s+([0-9]{1,2}:[0-9]{2}(?:\s*(?:AM|PM))?)/i);
-  if (timeMatch) {
-    time = timeMatch[1].toUpperCase();
-  }
-
-  // Determine Direction & Type
-  let type = 'expense';
-  let direction = 'out';
-  let counterparty = 'Unknown Merchant/Person';
-  let suggestedCategory = 'cat_misc';
-
+  const receipt = receiptMatch ? receiptMatch[1] : '';
   const lower = text.toLowerCase();
 
-  if (lower.includes('received ksh') || lower.includes('you have received') || lower.includes('deposited ksh')) {
-    direction = 'in';
-    type = 'income';
-    suggestedCategory = 'cat_income';
-    const fromMatch = text.match(/from\s+([A-Za-z\s]+?)(?:\s+[0-9]{10}|\s+on|\s+new\b|\.)/i);
-    if (fromMatch) counterparty = fromMatch[1].trim();
-  } else if (lower.includes('sent to') || lower.includes('transferred to')) {
-    direction = 'out';
-    type = 'transfer_out';
-    suggestedCategory = 'cat_personal';
-    const toMatch = text.match(/sent\s+to\s+([A-Za-z\s]+?)(?:\s+[0-9]{10}|\s+on|\s+for\b|\.)/i);
-    if (toMatch) counterparty = toMatch[1].trim();
-  } else if (lower.includes('paid to') || lower.includes('buy goods') || lower.includes('till')) {
-    direction = 'out';
-    type = 'merchant_buygoods';
-    suggestedCategory = 'cat_groceries';
-    const paidMatch = text.match(/paid\s+to\s+([^.]+?)(?:\s+on|\s+new\b|\.)/i);
-    if (paidMatch) counterparty = paidMatch[1].trim();
-  } else if (lower.includes('pay bill') || lower.includes('paybill') || lower.includes('to business')) {
-    direction = 'out';
-    type = 'paybill';
-    suggestedCategory = 'cat_bills';
-    const bizMatch = text.match(/(?:to\s+)(?:business\s+)?([^.]+?)(?:\s+for\s+account|\s+on|\s+new\b|\.)/i);
-    if (bizMatch) counterparty = bizMatch[1].trim();
-  } else if (lower.includes('withdraw') || lower.includes('agent')) {
-    direction = 'out';
-    type = 'cash_withdrawal';
-    suggestedCategory = 'cat_cash_transfer';
-    const agentMatch = text.match(/(?:from\s+agent|at\s+agent)\s+([^.]+?)(?:\s+on|\s+new\b|\.)/i);
-    if (agentMatch) counterparty = `Agent ${agentMatch[1].trim()}`;
-  } else if (lower.includes('airtime')) {
-    direction = 'out';
-    type = 'airtime';
-    suggestedCategory = 'cat_airtime';
-    counterparty = 'Safaricom Airtime';
-  } else if (lower.includes('m-shwari') || lower.includes('mshwari')) {
-    type = lower.includes('to m-shwari') ? 'mshwari_deposit' : 'mshwari_withdraw';
-    direction = lower.includes('to m-shwari') ? 'out' : 'in';
-    suggestedCategory = 'cat_savings';
-    counterparty = 'M-Shwari Savings';
-  } else if (lower.includes('fuliza')) {
-    type = 'fuliza_overdraft';
-    suggestedCategory = 'cat_fees';
-    counterparty = 'Safaricom Fuliza';
+  const balance = extractMoney(text, /(?:new\s+)?(?:m-?pesa|account)\s+balance\s*(?:is|was|:)?\s*(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i);
+  const fee = extractMoney(text, /(?:transaction\s+cost|transaction\s+fee|cost|fee)\s*[,:]?\s*(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/i) || 0;
+  const amountMatches = [...text.matchAll(/(?:Ksh|KES)\.?\s*([0-9,]+(?:\.[0-9]{1,2})?)/gi)];
+  let amount = 0;
+  for (const match of amountMatches) {
+    const before = text.slice(Math.max(0, match.index - 45), match.index).toLowerCase();
+    if (/balance\s*(?:is|was|:)?\s*$/.test(before) || /(transaction\s+cost|transaction\s+fee|fee|cost)\s*[,:]?\s*$/.test(before)) continue;
+    amount = moneyValue(match[1]);
+    break;
   }
 
-  // Double-entry account suggestions
-  const debitAccount = direction === 'out' ? suggestedCategory : 'acc_mpesa';
-  const creditAccount = direction === 'out' ? 'acc_mpesa' : suggestedCategory;
+  let date = '';
+  const dateMatch = text.match(/\bon\s+([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{2,4})\b/i);
+  if (dateMatch) {
+    const [day, month, rawYear] = dateMatch[1].split('/');
+    const year = rawYear.length === 2 ? '20' + rawYear : rawYear;
+    date = year + '-' + month.padStart(2, '0') + '-' + day.padStart(2, '0');
+  }
+  const timeMatch = text.match(/\bat\s+([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM)?)/i);
+  const time = timeMatch ? timeMatch[1].trim().toUpperCase() : '';
 
-  const confidence = (amount > 0 && balance !== null && receiptMatch) ? 0.95 : (amount > 0 ? 0.80 : 0.4);
-
-  return {
-    id: `tx_${receipt}_${Date.now()}`,
+  const result = {
+    id: '',
     receipt,
     rawText: text,
     date,
@@ -127,143 +52,231 @@ function parseLocalSms(rawText) {
     amount,
     fee,
     balance,
-    direction,
-    type,
-    counterparty: counterparty.slice(0, 60),
-    suggestedCategory,
-    debitAccount,
-    creditAccount,
-    confidence,
-    needsReview: confidence < 0.85 || amount === 0,
+    direction: 'out',
+    type: 'review_transfer',
+    counterparty: 'Unidentified transaction',
+    suggestedCategory: 'cat_misc',
+    debitAccount: 'cat_misc',
+    creditAccount: 'acc_mpesa',
+    confidence: 0.45,
+    needsReview: true,
+    reviewReason: 'Transaction type could not be safely identified',
     source: 'local_heuristic'
   };
+
+  const set = (values) => Object.assign(result, values);
+  const nameAfter = (regex, fallback) => {
+    const m = text.match(regex);
+    return m ? m[1].trim().replace(/\s+/g, ' ').slice(0, 80) : fallback;
+  };
+
+  if (/reversal|reversed|transaction reversed/i.test(text)) {
+    return set({ type: 'reversal', counterparty: 'M-Pesa reversal', confidence: 0.99, reviewReason: 'Reversal requires matching against the original transaction' });
+  }
+
+  if (/ziidi|unit trust/i.test(lower)) {
+    const isWithdrawal = /withdraw(?:al)?\s+from|unit\s+trust\s+withdraw/i.test(lower);
+    const isInvestment = /invest(?:ment)?\s+to|unit\s+trust\s+invest/i.test(lower);
+    if (isWithdrawal || isInvestment) {
+      return set({
+        direction: isInvestment ? 'out' : 'in',
+        type: isInvestment ? 'ziidi_investment' : 'ziidi_withdrawal',
+        counterparty: 'Ziidi Money Market Fund',
+        suggestedCategory: 'acc_ziidi',
+        debitAccount: isInvestment ? 'acc_ziidi' : 'acc_mpesa',
+        creditAccount: isInvestment ? 'acc_mpesa' : 'acc_ziidi',
+        confidence: receipt && amount > 0 ? 0.98 : 0.75,
+        needsReview: !(receipt && amount > 0),
+        reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
+      });
+    }
+  }
+
+  if (/m-shwari|mshwari/i.test(lower)) {
+    const deposit = /to\s+m-?shwari|deposit(?:ed)?\s+to\s+m-?shwari/i.test(lower);
+    return set({
+      direction: deposit ? 'out' : 'in',
+      type: deposit ? 'mshwari_deposit' : 'mshwari_withdrawal',
+      counterparty: 'M-Shwari Savings',
+      suggestedCategory: 'acc_mshwari',
+      debitAccount: deposit ? 'acc_mshwari' : 'acc_mpesa',
+      creditAccount: deposit ? 'acc_mpesa' : 'acc_mshwari',
+      confidence: receipt && amount > 0 ? 0.96 : 0.72,
+      needsReview: !(receipt && amount > 0),
+      reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
+    });
+  }
+
+  // Small Business wallet movements are internal wallet transfers, not income or expenses.
+  if (/small business wallet|business wallet|business account wallet/i.test(lower)) {
+    return set({
+      type: 'review_transfer',
+      counterparty: 'M-Pesa Small Business Wallet',
+      suggestedCategory: 'review',
+      confidence: 0.92,
+      needsReview: true,
+      reviewReason: 'Small Business wallet movement must be matched to its paired wallet record before importing'
+    });
+  }
+
+  if (/you have received|received ksh|deposited ksh|money received/i.test(lower)) {
+    const counterparty = nameAfter(/(?:from|by)\s+(.+?)(?:\s+\d{9,}| on \d{1,2}\/|\.\s|$)/i, 'Incoming sender');
+    const bankTransfer = /equity|kcb|co-operative|coop|stanbic|ncba/i.test(counterparty + ' ' + text);
+    if (bankTransfer && !/kcb/i.test(counterparty + ' ' + text)) {
+      return set({ direction: 'in', type: 'review_transfer', counterparty, suggestedCategory: 'review', confidence: 0.9, needsReview: true, reviewReason: 'Bank transfer detected but no matching ledger account exists; map the actual bank account before importing' });
+    }
+    if (!bankTransfer) {
+      return set({
+        direction: 'in',
+        type: 'review_transfer',
+        counterparty,
+        suggestedCategory: 'review',
+        confidence: receipt && amount > 0 ? 0.9 : 0.65,
+        needsReview: true,
+        reviewReason: 'Incoming person-to-person payment: confirm whether this is income or a transfer from your own account before importing'
+      });
+    }
+    return set({
+      direction: 'in',
+      type: 'account_transfer',
+      counterparty,
+      suggestedCategory: 'acc_bank',
+      debitAccount: 'acc_mpesa',
+      creditAccount: 'acc_bank',
+      confidence: receipt && amount > 0 ? 0.94 : 0.72,
+      needsReview: !(receipt && amount > 0),
+      reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
+    });
+  }
+
+  const standaloneCharge = /customer transfer of funds charge|pay bill charge|withdrawal charge|transaction charge/i.test(lower)
+    && !/paid to|sent to|buy goods|paybill/i.test(lower);
+  if (standaloneCharge) {
+    const charge = amount || fee || 0;
+    return set({
+      amount: charge,
+      fee: 0,
+      type: 'transaction_fee',
+      direction: 'out',
+      counterparty: 'M-Pesa Transaction Charge',
+      suggestedCategory: 'cat_fees',
+      confidence: receipt && charge > 0 ? 0.97 : 0.7,
+      needsReview: !(receipt && charge > 0),
+      reviewReason: receipt && charge > 0 ? '' : 'Missing receipt or charge amount'
+    });
+  }
+
+  if (/fuliza|overdraft|od loan/i.test(lower)) {
+    return set({ type: 'fuliza_review', counterparty: 'Fuliza', suggestedCategory: 'acc_fuliza', confidence: 0.95, reviewReason: 'Fuliza funding or repayment must be matched to the loan liability before posting' });
+  }
+
+  if (/withdraw(?:al)?\s+from\s+agent|at\s+agent|cash\s+withdraw/i.test(lower)) {
+    return set({
+      type: 'cash_withdrawal',
+      counterparty: nameAfter(/(?:from|at)\s+agent\s+(.+?)(?:\s+on\s+\d|\.\s|$)/i, 'M-Pesa Agent'),
+      suggestedCategory: 'acc_cash',
+      debitAccount: 'acc_cash',
+      creditAccount: 'acc_mpesa',
+      confidence: receipt && amount > 0 ? 0.96 : 0.7,
+      needsReview: !(receipt && amount > 0),
+      reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
+    });
+  }
+
+  if (/airtime|bundle|data bundle|postpaid/i.test(lower)) {
+    return set({ type: 'airtime', counterparty: 'Safaricom Airtime / Bundles', suggestedCategory: 'cat_airtime', confidence: receipt && amount > 0 ? 0.95 : 0.7, needsReview: !(receipt && amount > 0), reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount' });
+  }
+
+  if (/pay\s*bill|paybill|business number|paid\s+to.+for\s+account/i.test(lower)) {
+    const counterparty = nameAfter(/(?:to|for)\s+(?:business\s+)?(.+?)(?:\s+for\s+account|\s+on\s+\d|\.\s|$)/i, 'PayBill merchant');
+    return set({ type: 'paybill', counterparty, suggestedCategory: 'cat_bills', confidence: receipt && amount > 0 ? 0.9 : 0.68, needsReview: !(receipt && amount > 0), reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount' });
+  }
+
+  if (/paid\s+to|buy\s+goods|merchant payment|till number/i.test(lower)) {
+    const counterparty = nameAfter(/(?:paid\s+to|buy\s+goods\s+at|merchant payment to)\s+(.+?)(?:\s+on\s+\d|\s+new\s+m-?pesa|\.\s|$)/i, 'Merchant');
+    let category = 'cat_misc';
+    const merchant = counterparty.toLowerCase();
+    if (/market|supermarket|naivas|quickmart|carrefour|grocery|butchery/i.test(merchant)) category = 'cat_groceries';
+    else if (/cafe|restaurant|hotel|kitchen|food/i.test(merchant)) category = 'cat_eating';
+    else if (/petrol|fuel|shell|rubis|totalenergies/i.test(merchant)) category = 'cat_transport';
+    else if (/pharmacy|chemist|hospital|clinic/i.test(merchant)) category = 'cat_household';
+    return set({ type: 'merchant_payment', counterparty, suggestedCategory: category, confidence: receipt && amount > 0 ? 0.88 : 0.65, needsReview: !(receipt && amount > 0), reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount' });
+  }
+
+  if (/sent\s+to|transfer(?:red)?\s+to|customer transfer/i.test(lower) && /equity|kcb|co-operative|cooperative|coop|stanbic|ncba/i.test(lower)) {
+    const bank = /equity/i.test(lower) ? 'Equity Bank' : /kcb/i.test(lower) ? 'KCB Bank' : /co-?operative|coop/i.test(lower) ? 'Co-operative Bank' : /stanbic/i.test(lower) ? 'Stanbic Bank' : 'NCBA Bank';
+    if (!/kcb/i.test(lower)) {
+      return set({ type: 'review_transfer', counterparty: bank, suggestedCategory: 'review', confidence: 0.9, needsReview: true, reviewReason: 'Bank transfer detected but no matching ledger account exists; map the actual bank account before importing' });
+    }
+    return set({
+      type: 'account_transfer',
+      direction: 'out',
+      counterparty: bank,
+      suggestedCategory: 'acc_bank',
+      debitAccount: 'acc_bank',
+      creditAccount: 'acc_mpesa',
+      confidence: receipt && amount > 0 ? 0.94 : 0.7,
+      needsReview: !(receipt && amount > 0),
+      reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount'
+    });
+  }
+
+  if (/sent\s+to|send\s+money|customer transfer|transfer of funds|transferred to/i.test(lower)) {
+    return set({
+      type: 'review_transfer',
+      counterparty: nameAfter(/(?:sent\s+to|transfer(?:red)?\s+to)\s+(.+?)(?:\s+\d{9,}|\s+on\s+\d|\.\s|$)/i, 'Unknown recipient'),
+      suggestedCategory: 'review',
+      confidence: 0.9,
+      needsReview: true,
+      reviewReason: 'Outgoing person-to-person transfer: classify as expense or own-account transfer before importing'
+    });
+  }
+
+  return result;
 }
 
-/**
- * Split text into separate M-Pesa messages
- * Handles multiple delimiter styles: double line breaks, receipt codes, or line-by-line
- */
 function splitSmsMessages(raw) {
   const clean = String(raw || '').replace(/\r/g, '').trim();
   if (!clean) return [];
-
-  // M-Pesa receipt codes start with a capital letter followed by 9 alphanumeric chars
-  const receiptRegex = /\b[A-Z][A-Z0-9]{9}\b(?:\s+Confirmed)?/g;
-  const matches = [...clean.matchAll(receiptRegex)];
-
+  const matches = [...clean.matchAll(/\b[A-Z][A-Z0-9]{9}\b/g)];
   if (matches.length > 1) {
-    const pieces = [];
-    for (let i = 0; i < matches.length; i++) {
-      const start = matches[i].index;
-      const end = i + 1 < matches.length ? matches[i + 1].index : clean.length;
-      const part = clean.slice(start, end).trim();
-      if (part) pieces.push(part);
-    }
-    return pieces;
+    return matches.map((m, i) => clean.slice(m.index, matches[i + 1]?.index ?? clean.length).trim()).filter(Boolean);
   }
-
-  // Split by double line break or single line if lines look like separate SMS
-  const byParagraph = clean.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
-  if (byParagraph.length > 1) return byParagraph;
-
-  const byLine = clean.split('\n').map(l => l.trim()).filter(Boolean);
-  if (byLine.length > 1 && byLine.some(l => /\b[A-Z][A-Z0-9]{9}\b/.test(l))) {
-    return byLine;
-  }
-
-  return [clean];
+  const paragraphs = clean.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
+  return paragraphs.length > 1 ? paragraphs : [clean];
 }
 
-/**
- * Cloud AI Semantic Parser via Gemini
- */
 async function parseWithGemini(messages, apiKey) {
   if (!apiKey) return null;
-
-  const prompt = `You are an expert financial auditor and M-Pesa SMS message parser for a double-entry personal ledger.
-Analyze the following M-Pesa SMS confirmation messages. Return a JSON array with one object per message.
-
-Fields required for each:
-- receipt: 10-character M-Pesa alphanumeric code (e.g. TA12345678)
-- rawText: the original message
-- date: YYYY-MM-DD format
-- time: 12-hour format with AM/PM (e.g. "2:45 PM")
-- amount: float number in KES (principal transacted amount)
-- fee: float number in KES (transaction cost, 0.0 if free)
-- balance: float number in KES (the new M-Pesa balance after the transaction, null if not mentioned)
-- direction: "in" (money entered M-Pesa) or "out" (money left M-Pesa)
-- type: "expense" | "income" | "transfer_out" | "merchant_buygoods" | "paybill" | "cash_withdrawal" | "airtime" | "mshwari_deposit" | "mshwari_withdraw" | "fuliza_overdraft" | "reversal"
-- counterparty: clean name of merchant, till, paybill business, or individual person
-- suggestedCategory: "cat_groceries" | "cat_eating" | "cat_transport" | "cat_bills" | "cat_airtime" | "cat_household" | "cat_family" | "cat_fees" | "cat_income" | "cat_savings" | "cat_misc"
-- confidence: number between 0.0 and 1.0
-- needsReview: boolean (true if any detail is ambiguous or unusual)
-
-MESSAGES TO PARSE:
-${messages.map((m, idx) => `[Message ${idx + 1}]: ${m}`).join('\n\n')}
-
-Return ONLY valid JSON array with NO markdown backticks or commentary.`;
-
+  const prompt = `Parse these Safaricom M-Pesa SMS messages into JSON. Return one object per message with receipt, rawText, date (YYYY-MM-DD), time, amount (principal only), fee, balance, direction (in/out), type, counterparty, suggestedCategory, confidence, needsReview. Never classify an unknown person-to-person transfer as an expense. Use type "review_transfer" and needsReview true for ambiguous outgoing transfers. Ziidi investment/withdrawal must be identified as ziidi_investment/ziidi_withdrawal. Transaction charges are separate fees. Messages:\n${messages.map((m, i) => `[Message ${i + 1}] ${m}`).join("\n")}`;
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json"
-        }
-      })
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, responseMimeType: 'application/json' } })
     });
-
-    if (!response.ok) {
-      console.warn('Gemini API returned error:', response.status, await response.text());
-      return null;
-    }
-
+    if (!response.ok) return null;
     const data = await response.json();
-    const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!candidateText) return null;
-
-    const parsed = JSON.parse(candidateText.trim());
-    if (Array.isArray(parsed)) {
-      return parsed.map((item, i) => ({
-        ...item,
-        id: `tx_${item.receipt || 'AI'}_${Date.now()}_${i}`,
-        debitAccount: item.direction === 'out' ? item.suggestedCategory : 'acc_mpesa',
-        creditAccount: item.direction === 'out' ? 'acc_mpesa' : item.suggestedCategory,
-        source: 'gemini_ai'
-      }));
-    }
-  } catch (err) {
-    console.error('Gemini parsing error, falling back to local engine:', err.message);
-  }
-
-  return null;
+    const parsed = JSON.parse(data.candidates?.[0]?.content?.parts?.[0]?.text || 'null');
+    return Array.isArray(parsed) && parsed.length === messages.length ? parsed : null;
+  } catch (_) { return null; }
 }
 
-/**
- * Main parser entry point: Tries AI first if key exists, seamlessly falls back to resilient local engine
- */
 async function parseSmsBatch(rawText, apiKey) {
-  const pieces = splitSmsMessages(rawText);
-  if (!pieces.length) return [];
-
-  // Try Gemini if apiKey is provided
-  if (apiKey) {
-    const aiResult = await parseWithGemini(pieces, apiKey);
-    if (aiResult && aiResult.length === pieces.length) {
-      return aiResult;
-    }
-  }
-
-  // Local fallback (deterministic & free)
-  return pieces.map(piece => parseLocalSms(piece)).filter(Boolean);
+  const messages = splitSmsMessages(rawText);
+  const aiRows = await parseWithGemini(messages, apiKey);
+  // Deterministic rules are authoritative for transaction class and posting safety.
+  return messages.map((message, index) => {
+    const local = parseLocalSms(message);
+    const ai = aiRows && aiRows[index];
+    if (!local) return null;
+    if (!ai) return local;
+    const safe = { ...local };
+    if (local.type === 'review_transfer' || local.type === 'ziidi_investment' || local.type === 'ziidi_withdrawal' || local.type === 'fuliza_review' || local.type === 'reversal') return safe;
+    safe.counterparty = local.counterparty || ai.counterparty || 'Unknown';
+    safe.confidence = Math.min(local.confidence, Number(ai.confidence) || local.confidence);
+    safe.needsReview = local.needsReview || Boolean(ai.needsReview);
+    return safe;
+  }).filter(Boolean);
 }
 
-module.exports = {
-  parseSmsBatch,
-  splitSmsMessages,
-  parseLocalSms
-};
+module.exports = { parseSmsBatch, splitSmsMessages, parseLocalSms };

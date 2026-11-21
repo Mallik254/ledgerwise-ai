@@ -19,14 +19,14 @@ export interface LedgerEntry {
 
 export interface Transaction {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   time?: string;
   description: string;
   counterparty?: string;
   receipt?: string;
   amountCents: number;
   feeCents?: number;
-  balanceCents?: number; // Snapshot of running balance from provider
+  balanceCents?: number;
   entries: LedgerEntry[];
   type?: string;
   verified?: boolean;
@@ -50,6 +50,7 @@ export interface ParsedAiTransaction {
   creditAccount: string;
   confidence: number;
   needsReview: boolean;
+  reviewReason?: string;
   source: string;
   selected?: boolean;
 }

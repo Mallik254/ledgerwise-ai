@@ -32,7 +32,10 @@ export const App: React.FC = () => {
   // Ledger state
   const [accounts, setAccounts] = useState<Account[]>(() => {
     const saved = localStorage.getItem('ledgerwise_accounts');
-    return saved ? JSON.parse(saved) : INITIAL_ACCOUNTS;
+    if (!saved) return INITIAL_ACCOUNTS;
+    const stored: Account[] = JSON.parse(saved);
+    // Add newly supported asset accounts without disturbing existing user accounts or balances.
+    return INITIAL_ACCOUNTS.filter(account => account.id === 'acc_ziidi' && !stored.some(existing => existing.id === account.id)).concat(stored);
   });
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -72,7 +75,22 @@ export const App: React.FC = () => {
   };
 
   const handleImportBatch = (newTxs: Transaction[]) => {
-    setTransactions(prev => [...newTxs, ...prev]);
+    setTransactions(prev => {
+      // Prevent re-importing the same SMS batch while preserving legitimate paired
+      // statement rows that share a receipt but differ by transaction details.
+      const fingerprint = (tx: Transaction) => tx.receipt
+        ? [tx.receipt, tx.date, tx.time || '', tx.amountCents, tx.counterparty || '', tx.type || ''].join('|')
+        : '';
+      const seen = new Set(prev.map(fingerprint).filter(Boolean));
+      const unique = newTxs.filter(tx => {
+        const key = fingerprint(tx);
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return [...unique, ...prev];
+    });
   };
 
   const handleDeleteTransaction = (id: string) => {

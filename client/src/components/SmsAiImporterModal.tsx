@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MessageSquareText, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, X, Cpu, RefreshCw, Check } from 'lucide-react';
 import { ParsedAiTransaction, Transaction } from '../types';
-import { formatKes } from '../lib/doubleEntryEngine';
+import { formatKes, validateLedgerEntries } from '../lib/doubleEntryEngine';
 import { ThemeConfig } from '../lib/themes';
 
 interface SmsAiImporterModalProps {
@@ -48,7 +48,7 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
       // Select all valid rows by default
       const withSelection = (data.transactions || []).map((t: ParsedAiTransaction) => ({
         ...t,
-        selected: true
+        selected: !t.needsReview
       }));
 
       setParsedRows(withSelection);
@@ -65,32 +65,57 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
   };
 
   const handleCommitAll = () => {
-    const selected = parsedRows.filter(r => r.selected);
+    const selected = parsedRows.filter(r => r.selected && !r.needsReview);
     if (!selected.length) return;
 
     const newTransactions: Transaction[] = selected.map(item => {
       const amountCents = Math.round(item.amount * 100);
       const feeCents = Math.round(item.fee * 100);
-      const balanceCents = item.balance ? Math.round(item.balance * 100) : undefined;
+      const balanceCents = item.balance !== null ? Math.round(item.balance * 100) : undefined;
+      const entries: Transaction['entries'] = [];
+      const add = (accountId: string, debitCents: number, creditCents: number) => {
+        if (debitCents || creditCents) entries.push({ accountId, debitCents, creditCents });
+      };
 
-      const entries = [];
-      if (item.direction === 'out') {
-        entries.push({ accountId: item.suggestedCategory || 'cat_misc', debitCents: amountCents, creditCents: 0 });
-        if (feeCents > 0) {
-          entries.push({ accountId: 'cat_fees', debitCents: feeCents, creditCents: 0 });
+      // Asset-to-asset movements: Ziidi and M-Shwari are never expenses or income.
+      if (item.type === 'ziidi_investment' || item.type === 'mshwari_deposit') {
+        add(item.suggestedCategory, amountCents, 0);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
+        add('acc_mpesa', 0, amountCents + feeCents);
+      } else if (item.type === 'ziidi_withdrawal' || item.type === 'mshwari_withdrawal') {
+        add('acc_mpesa', amountCents, 0);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
+        add(item.suggestedCategory, 0, amountCents);
+        if (feeCents > 0) add('acc_mpesa', 0, feeCents);
+      } else if (item.type === 'cash_withdrawal') {
+        add('acc_cash', amountCents, 0);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
+        add('acc_mpesa', 0, amountCents + feeCents);
+      } else if (item.type === 'account_transfer') {
+        if (item.direction === 'in') {
+          add('acc_mpesa', amountCents, 0);
+          add(item.creditAccount || 'acc_bank', 0, amountCents);
+        } else {
+          add(item.debitAccount || 'acc_bank', amountCents, 0);
+          if (feeCents > 0) add('cat_fees', feeCents, 0);
+          add('acc_mpesa', 0, amountCents + feeCents);
         }
-        entries.push({ accountId: 'acc_mpesa', debitCents: 0, creditCents: amountCents + feeCents });
+      } else if (item.direction === 'in') {
+        add('acc_mpesa', amountCents, 0);
+        add('cat_income', 0, amountCents);
       } else {
-        entries.push({ accountId: 'acc_mpesa', debitCents: amountCents, creditCents: 0 });
-        entries.push({ accountId: item.suggestedCategory || 'cat_income', debitCents: 0, creditCents: amountCents });
+        add(item.suggestedCategory || 'cat_misc', amountCents, 0);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
+        add('acc_mpesa', 0, amountCents + feeCents);
       }
 
       return {
-        id: `tx_${item.receipt || Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: `tx_${item.receipt || 'no-receipt'}_${item.date}_${item.type}_${Math.random().toString(36).slice(2, 7)}`,
         date: item.date || new Date().toISOString().split('T')[0],
         time: item.time || '',
         receipt: item.receipt,
-        description: `${item.type.replace('_', ' ').toUpperCase()}: ${item.counterparty}`,
+        description: `${item.type.replace(/_/g, ' ').toUpperCase()}: ${item.counterparty}`,
+        type: item.type,
         counterparty: item.counterparty,
         amountCents,
         feeCents,
@@ -101,11 +126,30 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
       };
     });
 
-    onImportTransactions(newTransactions);
+    // Hard stop: never write a malformed or unbalanced journal entry to the ledger.
+    const invalid = newTransactions.filter(tx =>
+      !Number.isSafeInteger(tx.amountCents) ||
+      tx.amountCents <= 0 ||
+      !validateLedgerEntries(tx.entries)
+    );
+    if (invalid.length > 0) {
+      setError(`Import blocked: ${invalid.length} transaction(s) failed the double-entry balance check. Nothing was imported.`);
+      return;
+    }
+
+    // Keep legitimate paired rows sharing a receipt; only suppress exact duplicate rows in this batch.
+    const seen = new Set<string>();
+    const unique = newTransactions.filter(tx => {
+      const key = [tx.receipt, tx.date, tx.time, tx.amountCents, tx.counterparty, tx.type].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    onImportTransactions(unique);
     onClose();
   };
 
-  const selectedCount = parsedRows.filter(r => r.selected).length;
+  const selectedCount = parsedRows.filter(r => r.selected && !r.needsReview).length;\n  const reviewCount = parsedRows.filter(r => r.needsReview).length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -191,10 +235,10 @@ TC9820PQ11 Confirmed. Ksh1,000.00 sent to SAFARICOM HOME FIBRE for account 07220
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                  Parsed Transactions ({parsedRows.length} detected)
+                  Parsed Transactions ({parsedRows.length} detected • {reviewCount} held for review)
                 </span>
                 <span className={theme.classes.textMuted}>
-                  Zero transactions dropped • All items validated
+                  Review-required rows are held back and will not be posted
                 </span>
               </div>
 
@@ -229,7 +273,7 @@ TC9820PQ11 Confirmed. Ksh1,000.00 sent to SAFARICOM HOME FIBRE for account 07220
                         </td>
                         <td className="p-3">
                           <div className="font-medium">{row.counterparty}</div>
-                          <div className={`text-[10px] capitalize ${theme.classes.textMuted}`}>{row.type.replace('_', ' ')} • {row.suggestedCategory}</div>
+                          <div className={`text-[10px] capitalize ${theme.classes.textMuted}`}>{row.type.replace(/_/g, ' ')} • {row.suggestedCategory}{row.reviewReason ? ` • ${row.reviewReason}` : ''}</div>
                         </td>
                         <td className="p-3 text-right font-bold">
                           <span className={row.direction === 'in' ? 'text-emerald-600 dark:text-emerald-400' : ''}>
@@ -280,7 +324,7 @@ TC9820PQ11 Confirmed. Ksh1,000.00 sent to SAFARICOM HOME FIBRE for account 07220
               disabled={selectedCount === 0}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-medium shadow-md transition-all ${theme.classes.accentForest} disabled:opacity-50`}
             >
-              <span>Commit {selectedCount} Transactions to Double-Entry Ledger</span>
+              <span>Commit {selectedCount} Ready Transactions to Ledger</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           )}
