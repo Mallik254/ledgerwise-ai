@@ -80,12 +80,14 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
       // Asset-to-asset movements: Ziidi and M-Shwari are never expenses or income.
       if (item.type === 'ziidi_investment' || item.type === 'mshwari_deposit') {
         add(item.suggestedCategory, amountCents, 0);
-        add('acc_mpesa', 0, amountCents);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
+        add('acc_mpesa', 0, amountCents + feeCents);
       } else if (item.type === 'ziidi_withdrawal' || item.type === 'mshwari_withdrawal') {
         add('acc_mpesa', amountCents, 0);
         add(item.suggestedCategory, 0, amountCents);
       } else if (item.type === 'cash_withdrawal') {
         add('acc_cash', amountCents, 0);
+        if (feeCents > 0) add('cat_fees', feeCents, 0);
         add('acc_mpesa', 0, amountCents + feeCents);
       } else if (item.type === 'account_transfer') {
         if (item.direction === 'in') {
@@ -93,7 +95,8 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
           add(item.creditAccount || 'acc_bank', 0, amountCents);
         } else {
           add(item.debitAccount || 'acc_bank', amountCents, 0);
-          add('acc_mpesa', 0, amountCents);
+          if (feeCents > 0) add('cat_fees', feeCents, 0);
+          add('acc_mpesa', 0, amountCents + feeCents);
         }
       } else if (item.direction === 'in') {
         add('acc_mpesa', amountCents, 0);
@@ -110,6 +113,7 @@ export const SmsAiImporterModal: React.FC<SmsAiImporterModalProps> = ({
         time: item.time || '',
         receipt: item.receipt,
         description: `${item.type.replace(/_/g, ' ').toUpperCase()}: ${item.counterparty}`,
+        type: item.type,
         counterparty: item.counterparty,
         amountCents,
         feeCents,
