@@ -221,7 +221,7 @@ async function parseWithGemini(messages, apiKey) {
   if (!apiKey) return null;
   const prompt = `Parse these Safaricom M-Pesa SMS messages into JSON. Return one object per message with receipt, rawText, date (YYYY-MM-DD), time, amount (principal only), fee, balance, direction (in/out), type, counterparty, suggestedCategory, confidence, needsReview. Never classify an unknown person-to-person transfer as an expense. Use type "review_transfer" and needsReview true for ambiguous outgoing transfers. Ziidi investment/withdrawal must be identified as ziidi_investment/ziidi_withdrawal. Transaction charges are separate fees. Messages:\n${messages.map((m, i) => `[Message ${i + 1}] ${m}`).join("\n")}`;
   try {
-    const response = await fetch(\`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\${apiKey}\`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.1, responseMimeType: 'application/json' } })
     });
