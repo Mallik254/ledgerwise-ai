@@ -84,3 +84,21 @@ test('outgoing transfer to an unmapped bank is held for account mapping', () => 
   assert.equal(row.needsReview, true);
   assert.match(row.reviewReason, /no matching ledger account/);
 });
+
+
+test('incoming personal transfer is held for income-versus-own-transfer review', () => {
+  const row = parseLocalSms('TM12345678 Confirmed. You have received Ksh1,500.00 from JOHN MWANGI 0712345678 on 18/11/26 at 2:15 PM. New M-PESA balance is Ksh6,500.00.');
+  assert.equal(row.type, 'review_transfer');
+  assert.equal(row.needsReview, true);
+  assert.match(row.reviewReason, /confirm whether this is income or a transfer/);
+});
+
+test('Small Business wallet paid-in and withdrawal messages remain review-only', () => {
+  const paidIn = parseLocalSms('TN12345678 Confirmed. You have received Ksh1,000.00 from M-PESA SMALL BUSINESS WALLET on 18/11/26 at 2:15 PM.');
+  const withdrawn = parseLocalSms('TO12345678 Confirmed. Ksh1,000.00 withdrawn from M-PESA SMALL BUSINESS WALLET on 18/11/26 at 2:15 PM.');
+  for (const row of [paidIn, withdrawn]) {
+    assert.equal(row.type, 'review_transfer');
+    assert.equal(row.needsReview, true);
+    assert.match(row.reviewReason, /paired wallet record/);
+  }
+});
