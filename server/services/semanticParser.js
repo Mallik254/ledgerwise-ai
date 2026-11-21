@@ -161,7 +161,7 @@ function parseLocalSms(rawText) {
     return set({ type: 'airtime', counterparty: 'Safaricom Airtime / Bundles', suggestedCategory: 'cat_airtime', confidence: receipt && amount > 0 ? 0.95 : 0.7, needsReview: !(receipt && amount > 0), reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount' });
   }
 
-  if (/pay\s*bill|paybill|business number/i.test(lower)) {
+  if (/pay\s*bill|paybill|business number|paid\s+to.+for\s+account/i.test(lower)) {
     const counterparty = nameAfter(/(?:to|for)\s+(?:business\s+)?(.+?)(?:\s+for\s+account|\s+on\s+\d|\.\s|$)/i, 'PayBill merchant');
     return set({ type: 'paybill', counterparty, suggestedCategory: 'cat_bills', confidence: receipt && amount > 0 ? 0.9 : 0.68, needsReview: !(receipt && amount > 0), reviewReason: receipt && amount > 0 ? '' : 'Missing receipt or principal amount' });
   }
