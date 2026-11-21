@@ -171,6 +171,142 @@ function getLiveSnapshot() {
   };
 }
 
+
+/**
+ * Deterministic finance answers. Reads the live ledger through window.__lw.
+ * Returns null when a question needs interpretation beyond known ledger facts.
+ */
+function answerFromLedger(prompt: string): string | null {
+  const h = lw();
+  const state = h?.getState();
+  if (!h || !state) return null;
+  const q = prompt.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+  const month = h.getMonth();
+  const currency = state.profile?.currency || 'KES';
+  const money = (cents: number) => {
+    const amount = Number(cents || 0) / 100;
+    try {
+      return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+    } catch {
+      return currency + ' ' + amount.toFixed(2);
+    }
+  };
+  const totals = h.monthTotals(month);
+  const budget = h.budgetTotals(month);
+  const safe = h.safeToSpend();
+  const accountTotals = h.accountTotals();
+  const accounts = h.activeAccounts();
+  const categories = [...h.categoriesOf('expense'), ...h.categoriesOf('income')];
+  const monthLabel = (key: string) => {
+    const parts = key.split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  };
+
+  // Keep current-only facts separate from questions about a historical period.
+  const unsupportedPeriod = /\b(this year|last year|year to date|past \d+ months?|last \d+ months?|past week|last week|today|yesterday|in (january|february|march|april|may|june|july|august|september|october|november|december)|20\d{2})\b/.test(q);
+  const safeSpendQuestion = /\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q);
+  if (unsupportedPeriod && !safeSpendQuestion) return null;
+
+
+  if (/\bnet worth\b/.test(q)) {
+    return 'Your current net worth is ' + money(accountTotals.net) + ' (assets ' + money(accountTotals.assets) + ' less liabilities ' + money(accountTotals.liabilities) + ').';
+  }
+  if (/\bassets?\b/.test(q) && !/\bliabilit/.test(q)) return 'Your recorded assets total ' + money(accountTotals.assets) + '.';
+  if (/\bliabilit|owe\b/.test(q)) return 'Your recorded liabilities total ' + money(accountTotals.liabilities) + '.';
+  if (/\b(balance|balances)\b/.test(q)) {
+    const named = accounts.find((a: any) => q.includes(String(a.name || '').toLocaleLowerCase()));
+    if (named) return named.name + ' currently has a balance of ' + money(h.accountBalance(named.id)) + '.';
+    return 'Across your accounts, assets are ' + money(accountTotals.assets) + ', liabilities are ' + money(accountTotals.liabilities) + ', and net worth is ' + money(accountTotals.net) + '.';
+  }
+
+
+  // Search recent ledger entries locally; exclude reversals and reversed originals.
+  if (/\b(transactions?|entries|payments?|purchases?|receipts?)\b/.test(q)) {
+    const all = (state.transactions || [])
+      .filter((t: any) => t.type !== 'reversal' && !t.reversedBy)
+      .sort((a: any, b: any) => String(b.date || '').localeCompare(String(a.date || '')));
+    const namedCategory = categories.find((c: any) => q.includes(String(c.name || '').toLocaleLowerCase()));
+    const searchTerms = q
+      .replace(/\b(show|list|find|search|my|recent|latest|last|transactions?|entries|payments?|purchases?|receipts?|for|from|in|the|a|an|of|what|were|was|did|i|spend|spent|pay|paid)\b/g, ' ')
+      .split(/\s+/).filter((term) => term.length >= 3);
+    const matches = all.filter((t: any) => {
+      const categoryName = t.categoryId ? h.categoryById(t.categoryId)?.name : '';
+      const haystack = [t.payee, t.description, t.notes, categoryName].join(' ').toLocaleLowerCase();
+      return (!namedCategory || t.categoryId === namedCategory.id) &&
+        (!searchTerms.length || searchTerms.some((term) => haystack.includes(term)));
+    });
+    const requested = q.match(/\b(?:last|latest)\s+(\d{1,2})\b/);
+    const limit = Math.min(20, Math.max(1, requested ? Number(requested[1]) : 5));
+    if (!matches.length) return 'I could not find matching transactions in your recorded ledger.';
+    return 'Matching ledger entries:\\n' + matches.slice(0, limit).map((t: any) => {
+      const categoryName = t.categoryId ? h.categoryById(t.categoryId)?.name : 'Uncategorised';
+      const amount = money(t.amountCents || 0);
+      return String(t.date || 'Date not recorded') + ' — ' + (t.payee || t.description || 'Entry') + ' — ' + categoryName + ' — ' + amount + ' (' + t.type + ')';
+    }).join('\\n');
+  }
+
+  if (/\b(safe to spend|spendable|available to spend|how much can i spend)\b/.test(q)) {
+    return 'Your safe-to-spend amount is ' + money(safe.safe) + '. This starts with liquid funds of ' + money(safe.liquid) + ', then subtracts upcoming bills (' + money(safe.bills) + '), goal reserves (' + money(safe.reserved) + '), and your buffer (' + money(safe.buffer) + ') over the next ' + safe.window + ' days.';
+  }
+
+  const previous = /\b(last month|previous month)\b/.test(q);
+  const monthKey = previous ? h.addMonthsKey(month, -1) : month;
+  const selectedTotals = previous ? h.monthTotals(monthKey) : totals;
+  const selectedBudget = previous ? h.budgetTotals(monthKey) : budget;
+  const label = monthLabel(monthKey);
+  const asksIncome = /\b(income|earned|earnings|received)\b/.test(q);
+  const asksExpense = /\b(spend|spends|spent|spending|expenses?|expense total)\b/.test(q);
+  const asksNet = /\b(net|surplus|deficit|cash ?flow)\b/.test(q);
+
+  if (/\b(top|highest|most|biggest)\b/.test(q) && /\b(category|categories|spend|spending|spent)\b/.test(q)) {
+    const ranked = [...selectedTotals.byCategory.entries()]
+      .filter(([, amount]) => amount > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (!ranked.length) return 'There is no recorded category spending for ' + label + '.';
+    const [categoryId, amount] = ranked[0];
+    const category = h.categoryById(categoryId);
+    return 'Your highest spending category for ' + label + ' is ' + (category?.name || 'Uncategorized') + ' at ' + money(amount) + '.';
+  }
+
+  if (asksIncome && asksExpense && !asksNet) {
+    const net = selectedTotals.income - selectedTotals.expense;
+    return 'For ' + label + ', recorded income was ' + money(selectedTotals.income) + ', expenses were ' + money(selectedTotals.expense) + ', and the net result was ' + money(Math.abs(net)) + (net >= 0 ? ' surplus.' : ' deficit.');
+  }
+  if (asksIncome && !asksExpense && !asksNet) return 'Your recorded income for ' + label + ' is ' + money(selectedTotals.income) + '.';
+  if (asksExpense && !asksIncome && !asksNet) {
+    const category = categories.find((c: any) => c.type === 'expense' && q.includes(String(c.name || '').toLocaleLowerCase()));
+    if (category) {
+      const amount = selectedTotals.byCategory.get(category.id) || 0;
+      return 'You spent ' + money(amount) + ' in ' + category.name + ' during ' + label + '.';
+    }
+    return 'Your recorded expenses for ' + label + ' total ' + money(selectedTotals.expense) + '.';
+  }
+  if (asksNet) {
+    const net = selectedTotals.income - selectedTotals.expense;
+    return 'For ' + label + ', income was ' + money(selectedTotals.income) + ' and expenses were ' + money(selectedTotals.expense) + ', leaving a net ' + (net >= 0 ? 'surplus' : 'deficit') + ' of ' + money(Math.abs(net)) + '.';
+  }
+
+  if (/\b(budget|budgets|overspent|over budget)\b/.test(q)) {
+    if (!selectedBudget.rows?.length) return 'There are no budget limits recorded for ' + label + '.';
+    const rows = selectedBudget.rows as any[];
+    const over = rows.filter((r) => r.spentCents > r.limitCents);
+    const remaining = selectedBudget.limit - selectedBudget.spent;
+    const summary = 'For ' + label + ', you have used ' + money(selectedBudget.spent) + ' of ' + money(selectedBudget.limit) + ' in recorded budgets; ' + (remaining >= 0 ? money(remaining) + ' remains' : money(Math.abs(remaining)) + ' over budget') + '.';
+    if (/overspent|over budget/.test(q)) {
+      return over.length
+        ? summary + ' Over-budget categories: ' + over.map((r) => (r.category?.name || 'Unnamed') + ' (' + money(r.spentCents - r.limitCents) + ' over)').join(', ') + '.'
+        : summary + ' No budget category is currently over its limit.';
+    }
+    return summary;
+  }
+
+  if (/\b(account|accounts|wallets)\b/.test(q) && /\b(list|show|which|my|balances?)\b/.test(q)) {
+    if (!accounts.length) return 'There are no active accounts in your ledger.';
+    return 'Your active account balances: ' + accounts.map((a: any) => a.name + ': ' + money(h.accountBalance(a.id))).join('; ') + '.';
+  }
+  return null;
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -1205,15 +1341,22 @@ function mountAiSuite() {
     const pending = appendChat('lw-ai-msg model', 'Thinking…');
 
     try {
-      const res = await postJson<{ text: string }>('/api/ai/ask', {
-        prompt,
-        history: chatHistory,
-        ledgerContext: getLiveSnapshot(),
-        personaInstruction: PERSONA_PROMPTS[currentPersona] || PERSONA_PROMPTS['cfo'],
-      });
-      pending.textContent = res.text || 'No response returned.';
-      chatHistory.push({ role: 'user', text: prompt });
-      chatHistory.push({ role: 'model', text: res.text });
+      const localAnswer = answerFromLedger(prompt);
+      if (localAnswer) {
+        pending.textContent = localAnswer + '\n\nAnswered directly from your live ledger. No AI request was sent.';
+        chatHistory.push({ role: 'user', text: prompt });
+        chatHistory.push({ role: 'model', text: localAnswer });
+      } else {
+        const res = await postJson<{ text: string }>('/api/ai/ask', {
+          prompt,
+          history: chatHistory,
+          ledgerContext: getLiveSnapshot(),
+          personaInstruction: PERSONA_PROMPTS[currentPersona] || PERSONA_PROMPTS['cfo'],
+        });
+        pending.textContent = res.text || 'No response returned.';
+        chatHistory.push({ role: 'user', text: prompt });
+        chatHistory.push({ role: 'model', text: res.text });
+      }
     } catch (err) {
       pending.remove();
       appendChat('lw-ai-err', err instanceof Error ? err.message : 'Unable to reach AI.');
